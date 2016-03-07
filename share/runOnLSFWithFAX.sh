@@ -1,0 +1,112 @@
+#For the people not using /bin/bash
+if [ $SHELL != '/bin/bash' ]; then
+    echo 'Please change your shell to /bin/bash to use this script!!'
+    return
+fi
+
+#default target directory
+TARGETDS=$1
+if [ $# -lt 1 ]; then
+  echo '============================================================================'
+  echo 'This script execute "testRun" against all the dataset in [Dataset path].'
+  echo 'Works only on the nodes'
+  echo 'Usage :'
+  echo '$source brunall.sh [Dataset path] [selction region1] [selection region2],,,'
+  echo '============================================================================'
+  echo 'Exitting ...'
+  return 1
+fi
+
+#check if there is a specified target selection region
+TARGETSELECREG=''
+if [ $# -lt 2 ]; then
+  echo 'Specify at least one target selection region (e.g. test,3lep...)'
+  return 1
+fi
+
+#additional target selection region
+while [ "$2" != "" ]
+do
+  TARGETSELECREG='-S '$2' '$TARGETSELECREG
+  shift
+done
+
+echo Target DS directory     = $TARGETDS
+echo Target selection region = $TARGETSELECREG
+
+###########################################################
+# Finding new output directory (result/hXXX/)
+###########################################################
+for OUTDIR in `\ls result | grep h`
+do
+    maxTagNum=0
+    if [ `echo $OUTDIR | cut -c 1` = 'h' ]; then
+        num=`echo $OUTDIR | cut -c 2-5`
+        expr "$num" + 1 >/dev/null 2>&1
+        if [ $? -lt 2 ]; then #checking if $num is numeric or not
+            if [ $num -gt $maxTagNum ]; then
+                maxTagNum=`expr $num`
+            fi
+        fi
+    fi
+done
+tagNum4ThisTime=`expr $maxTagNum + 1`
+tagNum=`printf "%04d" $tagNum4ThisTime` #zero padding
+echo h$tagNum
+\mkdir lsfoutput/h${tagNum}
+\mkdir result/h${tagNum}
+
+###########################################################
+# Submitting jobs to the dataset in the target directory 
+###########################################################
+for TXT in `\ls $TARGETDS`
+do
+lenFilelistDirName=${#TXT}
+#extension check (should be .txt)
+extensionStartPos=`expr $lenFilelistDirName - 3`
+extensionEndPos=`expr $lenFilelistDirName`
+extension=`echo $TXT | cut -c $extensionStartPos-$extensionEndPos`
+if [ "$extension" = ".txt" ]; then
+#    echo "matched"
+    :
+else
+#    echo "unmatched"
+    continue
+fi
+#extracting run number
+if [ $lenFilelistDirName -eq 10 ]; then
+    startPos=`expr $lenFilelistDirName - 9`
+    runnumEndPos=`expr $startPos + 5`
+    outputDirEndPos=`expr $lenFilelistDirName - 4`
+elif [ $lenFilelistDirName -gt 10 ]; then
+    startPos=1
+    runnumEndPos=`expr $startPos + 5`
+    outputDirEndPos=`expr $lenFilelistDirName - 4`
+fi
+outputDir=`echo $TXT | cut -c $startPos-$outputDirEndPos`
+runnum=`echo $TXT | cut -c $startPos-$runnumEndPos`
+#echo $TXT
+######################################################
+
+######################################################
+# Waiting for #submitted jobs to be less than maxJobs
+maxJobs=800
+while [ $(bjobs | wc -l) -gt $maxJobs  ]
+do
+    echo Currently $(bjobs | wc -l) jobs are runnning. Wait for 10 seconds to keep less running jobs...
+    sleep 10
+done
+######################################################
+
+maxEve=-1
+queue=1d
+echo Starting testRun for DSID=$runnum ...
+echo bsub -q ${queue} -e ./lsfoutput/h${tagNum}/${outputDir}_error.log -o ./lsfoutput/h${tagNum}/${outputDir}.log testRun -n $maxEve --FileDirBase $TARGETDS --filelist $TXT -o result/h${tagNum}/$outputDir --useFAX $TARGETSELECREG
+bsub -q ${queue} -e ./lsfoutput/h${tagNum}/${outputDir}_error.log -o ./lsfoutput/h${tagNum}/${outputDir}.log testRun -n $maxEve --FileDirBase $TARGETDS --filelist $TXT -o result/h${tagNum}/$outputDir --useFAX $TARGETSELECREG
+done
+
+echo '================================================='
+echo 'Tag=h${tagNum} was used for this submission. '
+echo 'Output files will appear in result/h${tagNum}.'
+echo 'Log files will appear in lsfoutput/h${tagNum}.'
+echo '================================================='
